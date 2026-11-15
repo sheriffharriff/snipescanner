@@ -40,8 +40,9 @@ def test_vague_watch_skips_named_models():
 
 def test_misspelling_only():
     w = W["Carhartt misspelled"]
-    assert s.evaluate(item("Carhart jacket brown XL", 20), w, ST, NOW)
-    assert s.evaluate(item("Carhartt jacket brown XL", 20), w, ST, NOW) is None
+    assert s.evaluate(item("Carhart blanket lined chore jacket brown XL", 20), w, ST, NOW)
+    assert s.evaluate(item("Carhartt blanket lined chore jacket brown XL", 20), w, ST, NOW) is None
+    assert s.evaluate(item("Carhart jacket brown XL", 20), w, ST, NOW) is None   # misspelling alone is not enough
 
 def test_auction_window():
     w = W["Arc'teryx Beta LT"]
@@ -182,3 +183,30 @@ def test_select_respects_cap():
     st = dict(ST, max_alerts_per_run=3, max_gender_lead=4, always_alert_profit=100)
     chosen, _ = s.select_alerts([cand(i, None, 30 + i) for i in range(9)], 0, st)
     assert len(chosen) == 3 and chosen[0]["profit"] == 38
+
+def test_junk_from_first_live_scan_is_dropped():
+    """Real titles that got through on 2026-11-14 and should not have."""
+    bad = [("Arc'teryx no model named", "Arc’teryx norcal sticker set movie pro leaf arcteryx goretex jackets california", 29.99),
+           ("Arc'teryx no model named", "Sierra Designs Savage Jacket Rare Arcteryx Like Shell Goretex Style", 64),
+           ("Carhartt Detroit jacket", "Vtg Port Authority Jacket Mens XL Detroit Carhartt Style Corduroy Collar *Logo*", 50.9),
+           ("Carhartt Detroit jacket", "Carhartt 103828 Detroit Jacket Mens 4XL Black Blanket Lined Duck Canvas Coat", 74),
+           ("Carhartt Detroit jacket", "Carhartt Iconic Crawford Detroit Size Small 4/6 Natural Blanket Lined Zip Jacket", 52.98),
+           ("Carhartt misspelled", "Carhart Men's Jacket, Size XL - Black  Relaxed Fit Lightweight Softshell Jacket", 20),
+           ("Carhartt misspelled", "Men's Dark Blue Carhart Work shirt - Size XL", 29.99),
+           ("Carhartt misspelled", "Lee Sherpa Lined Jacket Size M/ Carhart Style", 55),
+           ("Carhartt misspelled", "Carhart J176 Black Small Some Staining", 45),
+           ("Carhartt vintage, no model named", "Carhartt Jacket Hood One Size Duck Brown Snap Blanket Lined Replace A03 Vtg '99", 40.87),
+           ("Patagonia Retro-X", "Patagonia, Kid's, Baby Retro-X Fleece Zipper Jacket, Natural & Orange, Size 4T", 30.95),
+           ("Patagonia misspelled", "Pategonia Classic Synchilla Women's Fleece Vest \"ViaCom\" Black Size S Pre-Owned", 9.98),
+           ("Patagonia misspelled", "Pategonia Gray Men’s Micro Fleece Quarter Zip Pullover Size Small", 15.4)]
+    for watch, title, price in bad:
+        assert s.evaluate(item(title, price), W[watch], ST, NOW) is None, title
+    good = [("Carhartt Detroit jacket", "Carhartt Brown Detroit Quilt Lined Jacket Corduroy Collar USA 50 Tall Vintage", 34.97),
+            ("Carhartt vintage, no model named", "Vintage Carhartt Jacket Men's Blanket Lined Chore Coat Made in USA Size  L -48", 38),
+            ("Patagonia Retro-X", "Women’s M Patagonia Retro-X Jacket Burgundy 23071 Deep Pile Fleece Full Zip", 26.32),
+            ("Arc'teryx Beta AR", "Arcteryx Beta AR jacket mens L like new", 120)]
+    for watch, title, price in good:
+        assert s.evaluate(item(title, price), W[watch], ST, NOW), title
+
+def test_4xl_is_an_off_size():
+    assert s.detect_size("Carhart brown duck canvas jacket, Size 4XL") == "4XL+"

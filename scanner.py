@@ -34,8 +34,11 @@ GENDER_LEAD_KEY = "_gender_lead"      # women's alerts sent minus men's alerts s
 
 WOMEN_RE = re.compile(r"\b(women|womens|woman|ladies|lady|wmns|wmn|female|w's)\b")
 MEN_RE = re.compile(r"\b(men|mens|man|male|m's)\b")
+# "Carhartt style", "Arcteryx like shell": another brand borrowing the name. "like new" is fine.
+COMPARE_RE = re.compile(r"\b(style|inspired|similar to)\b|\blike\b(?! new)")
 SIZE_PATTERNS = [   # order matters: longer sizes first
     ("XXS", r"\b(xxs|2xs|xx-small)\b"),
+    ("4XL+", r"\b(4xl|5xl|6xl|4x|5x|xxxxl)\b"),
     ("3XL", r"\b(xxxl|3xl|3x)\b"),
     ("XXL", r"\b(xxl|2xl|2x|xx-large|xx large)\b"),
     ("XS", r"\b(xs|x-small|x small|extra small)\b"),
@@ -70,6 +73,11 @@ def detect_size(title):
         if re.search(pattern, t):
             return size
     return None
+
+
+def has_word(title, word):
+    """True if `word` starts a word in the title: 'stain' matches 'stained', 'vest' does not match 'harvest'."""
+    return re.search(r"(?<![a-z0-9])" + re.escape(word.lower()), title) is not None
 
 
 def total_cost(item):
@@ -110,12 +118,15 @@ def evaluate(item, watch, settings, now=None):
     if brand and not any(b.lower() in title for b in brand):
         return None
 
-    for word in settings.get("exclude_words", []) + watch.get("exclude_words", []):
-        if word.lower() in title:
-            return None
-    required = watch.get("require_any", [])
-    if required and not any(w.lower() in title for w in required):
+    if COMPARE_RE.search(title):
         return None
+    for word in settings.get("exclude_words", []) + watch.get("exclude_words", []):
+        if has_word(title, word):
+            return None
+    for group in ("require_any", "must_also_have"):     # both groups must match when present
+        required = watch.get(group, [])
+        if required and not any(w.lower() in title for w in required):
+            return None
     # "vague" watches only want listings that DON'T name a known model
     if any(w.lower() in title for w in watch.get("skip_if_title_has", [])):
         return None
