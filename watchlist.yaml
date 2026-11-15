@@ -1,0 +1,91 @@
+# Watchlist for the snipe scanner. Edit this file to tune what gets flagged.
+#
+# expected_sale = what a clean used example realistically SELLS for (not asking price).
+# The scanner works out the highest price worth paying from expected_sale and the
+# settings below, then only alerts on listings under that line.
+#
+# Prices marked [checked] come from sold listings looked up on 2026-11-11.
+# Prices marked [estimate] are starting guesses. Check sold listings before trusting them.
+
+settings:
+  sell_fee_pct: 14          # marketplace + payment fees when you resell
+  ship_out_cost: 10         # what it costs you to ship the item to your buyer
+  min_profit: 25            # skip anything that nets less than this
+  min_roi_pct: 50           # skip anything that returns less than this on cost
+  min_price: 8              # ignore junk listings below this
+  auction_window_hours: 3   # only alert on auctions ending within this many hours
+  results_per_search: 50
+  max_alerts_per_run: 10
+  condition_ids: [1000, 1500, 1750, 2990, 3000]   # new, and pre-owned down to "good"
+  exclude_words:
+    - kids
+    - youth
+    - toddler
+    - boys
+    - girls
+    - infant
+    - for parts
+    - damaged
+    - stained
+    - ripped
+    - torn
+    - delaminat
+    - replica
+    - patch only
+    - tag only
+    - zipper broken
+
+watches:
+  # ---- Arc'teryx: named models priced low ----
+  - name: Arc'teryx Beta AR
+    query: arcteryx beta ar jacket
+    require_any: [beta ar]
+    expected_sale: 300        # [checked] used sold $330-400, new with tags $500-590
+  - name: Arc'teryx Beta LT
+    query: arcteryx beta lt jacket
+    require_any: [beta lt]
+    expected_sale: 220        # [checked] used sold $200-390
+  - name: Arc'teryx Alpha SV
+    query: arcteryx alpha sv jacket
+    require_any: [alpha sv]
+    expected_sale: 330        # [estimate]
+  - name: Arc'teryx Atom
+    query: arcteryx atom hoody
+    require_any: [atom]
+    expected_sale: 120        # [estimate]
+
+  # ---- Arc'teryx: misspelled or vague listings (the real snipes) ----
+  - name: Arc'teryx misspelled
+    query: [arcterix jacket, arcteryz jacket, arc teryx jacket, arcteyx jacket, arcterx jacket]
+    require_any: [arcterix, arcteryz, "arc teryx", arcteyx, arcterx]
+    expected_sale: 150        # [estimate] blended; check the model before buying
+  - name: Arc'teryx no model named
+    query: arcteryx gore-tex jacket
+    skip_if_title_has: [beta, alpha, zeta, theta, gamma, atom, sabre, rush, macai, sidewinder, cerium, proton]
+    expected_sale: 170        # [estimate] an unnamed Gore-Tex shell is usually worth at least this
+
+  # ---- Carhartt ----
+  - name: Carhartt Detroit jacket
+    query: carhartt detroit jacket
+    require_any: [detroit, j001, j97]
+    exclude_words: [wip, women]
+    expected_sale: 150        # [checked] blanket-lined Detroit median about $190-200; set lower to be safe
+  - name: Carhartt vintage, no model named
+    query: vintage carhartt blanket lined jacket
+    skip_if_title_has: [detroit, j001, j97]
+    expected_sale: 90         # [checked] chore coats $65-175; generic Carhartt jackets median only $45
+  - name: Carhartt misspelled
+    query: [carhart jacket, carhardt jacket, carharrt jacket]
+    require_any: ["carhart ", carhardt, carharrt]
+    exclude_words: [wip, women]
+    expected_sale: 110        # [estimate]
+
+  # ---- Patagonia (lower prices, so fewer alerts will clear the profit floor) ----
+  - name: Patagonia Retro-X
+    query: patagonia retro-x fleece jacket
+    require_any: [retro-x, retro x]
+    expected_sale: 85         # [checked] resale $45-120
+  - name: Patagonia misspelled
+    query: [patogonia fleece, pategonia fleece, patagona fleece]
+    require_any: [patogonia, pategonia, patagona]
+    expected_sale: 70         # [estimate]
