@@ -373,7 +373,13 @@ def main():
     print(f"sent:       men={count(chosen, 'men')} women={count(chosen, 'women')} unstated={count(chosen, None)}"
           f" held={len(cands) - sent} gender_lead={lead}")
 
-    save_seen(seen)
+    if dry:
+        print("--- all candidates (dry run: nothing sent, nothing saved) ---")
+        for c in sorted(cands, key=lambda c: (c["watch"], -c["profit"])):
+            print(f"{c['watch'][:28]:28} | ${c['cost']:>6.2f} -> ${c['expected_sale']:>5.0f} | "
+                  f"{(c['gender'] or '-'):5} {(c['size'] or '-'):3} | {'AUC' if c['auction'] else 'BIN'} | {c['title'][:90]}")
+    else:
+        save_seen(seen)
     summary = f"watch searches={searches} alerts={sent} errors={errors} auction_pass={len(passes) == 2}"
     print(summary)
     if manual and not dry:

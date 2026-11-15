@@ -3,6 +3,11 @@ on:
   schedule:
     - cron: "*/10 * * * *"
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: list every candidate in the log, send nothing"
+        type: boolean
+        default: false
 permissions:
   contents: write
 concurrency:
@@ -26,6 +31,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           # A manual "Run workflow" also sends a "scanner is working" message to Telegram.
+          DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
           SEND_SUMMARY: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
       - name: Save seen listings
         run: |
