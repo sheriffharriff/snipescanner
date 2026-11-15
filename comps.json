@@ -1,1 +1,62 @@
-{}
+{
+ "Arc'teryx no model named": {
+  "fetched": "2026-11-15T06:09:11.493686+00:00",
+  "stats": {
+   "all": {
+    "median": 250.0,
+    "n": 59
+   },
+   "men": {
+    "median": 250.0,
+    "n": 47
+   },
+   "women": {
+    "median": 200.0,
+    "n": 5
+   }
+  }
+ },
+ "Carhartt Detroit jacket": {
+  "fetched": "2026-11-15T06:09:11.493686+00:00",
+  "stats": {
+   "all": {
+    "median": 279.0,
+    "n": 128
+   },
+   "men": {
+    "median": 265.98,
+    "n": 53
+   }
+  }
+ },
+ "Carhartt vintage, no model named": {
+  "fetched": "2026-11-15T06:09:11.493686+00:00",
+  "stats": {
+   "all": {
+    "median": 131.99,
+    "n": 134
+   },
+   "men": {
+    "median": 140.0,
+    "n": 65
+   }
+  }
+ },
+ "Patagonia Retro-X": {
+  "fetched": "2026-11-15T06:09:11.493686+00:00",
+  "stats": {
+   "all": {
+    "median": 140.47,
+    "n": 172
+   },
+   "men": {
+    "median": 148.5,
+    "n": 117
+   },
+   "women": {
+    "median": 101.99,
+    "n": 20
+   }
+  }
+ }
+}
