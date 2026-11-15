@@ -6,6 +6,10 @@ Env vars:
   DRY_RUN=1                            print alerts instead of sending them
   SEND_SUMMARY=1                       also send a "scanner is working" message to Telegram
 
+Asking-price check: for every watch that has a candidate, the scanner looks up what
+similar live listings ask (once a day per watch, cached in comps.json). Sold prices run
+below asking prices, so the expected sale is capped at median asking x asking_to_sale_factor.
+
 Each run does a Buy It Now pass (newest listings first). About once an hour it also
 does an auction pass (auctions ending soonest first).
 """
@@ -14,6 +18,7 @@ import html
 import json
 import os
 import re
+import statistics
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -24,6 +29,7 @@ import yaml
 
 ROOT = Path(__file__).parent
 SEEN_FILE = ROOT / "seen.json"
+COMPS_FILE = ROOT / "comps.json"       # cached asking prices of similar listings, per watch
 SEEN_DAYS = 14
 TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
 SEARCH_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search"
@@ -108,27 +114,32 @@ def hours_left(item, now=None):
     return (end_dt - now).total_seconds() / 3600
 
 
-def evaluate(item, watch, settings, now=None):
-    """Return an alert dict if the listing is a buy candidate, else None."""
-    title = norm(item.get("title"))
-
+def title_ok(title, watch, settings):
+    """True if a (normalised) title passes the watch's word rules."""
     # The brand must be in the title. eBay also matches on descriptions, which lets
     # other brands through (e.g. a jacket that only mentions the brand as a comparison).
     brand = watch.get("brand", [])
     if brand and not any(b.lower() in title for b in brand):
-        return None
-
+        return False
     if COMPARE_RE.search(title):
-        return None
+        return False
     for word in settings.get("exclude_words", []) + watch.get("exclude_words", []):
         if has_word(title, word):
-            return None
+            return False
     for group in ("require_any", "must_also_have"):     # both groups must match when present
         required = watch.get(group, [])
         if required and not any(w.lower() in title for w in required):
-            return None
+            return False
     # "vague" watches only want listings that DON'T name a known model
     if any(w.lower() in title for w in watch.get("skip_if_title_has", [])):
+        return False
+    return True
+
+
+def evaluate(item, watch, settings, now=None):
+    """Return an alert dict if the listing is a buy candidate, else None."""
+    title = norm(item.get("title"))
+    if not title_ok(title, watch, settings):
         return None
 
     cost = total_cost(item)
@@ -194,6 +205,55 @@ def auction_pass_due(seen, now=None):
     return (now - datetime.fromisoformat(last)).total_seconds() >= AUCTION_PASS_EVERY_MIN * 60
 
 
+def summarise_comps(items, watch, settings):
+    """Median asking price (with shipping) of similar live listings, overall and by gender."""
+    prices = {"all": [], "men": [], "women": []}
+    for it in items:
+        if not title_ok(norm(it.get("title")), watch, settings):
+            continue
+        cost = total_cost(it)
+        if cost is None:
+            continue
+        prices["all"].append(cost)
+        gender = detect_gender(it.get("title"))
+        if gender:
+            prices[gender].append(cost)
+    return {k: {"median": round(statistics.median(v), 2), "n": len(v)} for k, v in prices.items() if v}
+
+
+def apply_asking_check(alert, comps, settings):
+    """Cap the expected sale using what similar listings ask. Returns the alert, or None
+    if it no longer clears the profit floors. With too few similar listings the alert is
+    kept as is and says so."""
+    alert = dict(alert, asking_median=None, asking_n=0)
+    stats = (comps or {}).get(alert["gender"] or "all")
+    if not stats or stats["n"] < settings["min_comps"]:
+        stats = (comps or {}).get("all")
+    if not stats or stats["n"] < settings["min_comps"]:
+        return alert
+    alert["asking_median"], alert["asking_n"] = stats["median"], stats["n"]
+    market_sale = round(stats["median"] * settings["asking_to_sale_factor"], 2)
+    if market_sale >= alert["expected_sale"]:
+        return alert
+    alert["estimate_before_check"] = alert["expected_sale"]
+    alert["expected_sale"] = market_sale
+    net = market_sale * (1 - settings["sell_fee_pct"] / 100) - settings["ship_out_cost"]
+    profit = net - alert["cost"]
+    roi = profit / alert["cost"] if alert["cost"] > 0 else 0.0
+    if profit < settings["min_profit"] or roi < settings["min_roi_pct"] / 100:
+        return None
+    alert["profit"], alert["roi_pct"] = round(profit, 2), round(roi * 100)
+    return alert
+
+
+def comps_stale(entry, settings, now=None):
+    if not entry or "fetched" not in entry:
+        return True
+    now = now or datetime.now(timezone.utc)
+    age = (now - datetime.fromisoformat(entry["fetched"])).total_seconds() / 3600
+    return age >= settings["comps_refresh_hours"]
+
+
 def select_alerts(candidates, lead, settings):
     """Pick which candidates to send this run, keeping men's and women's alerts balanced.
 
@@ -224,6 +284,15 @@ def select_alerts(candidates, lead, settings):
     return chosen, lead
 
 
+def asking_line(a):
+    if not a.get("asking_median"):
+        return "Similar listings: too few to compare"
+    line = f"Similar listings ask: ${a['asking_median']:.0f} median ({a['asking_n']} listings)"
+    if a.get("estimate_before_check"):
+        line += f", so estimate cut from ${a['estimate_before_check']:.0f}"
+    return line
+
+
 def format_alert(a):
     kind = (f"AUCTION, {a['hours_left']}h left, {a['bids'] or 0} bids" if a["auction"] else "BUY IT NOW")
     who = {"men": "Men's", "women": "Women's"}.get(a.get("gender"), "Gender not stated")
@@ -234,6 +303,7 @@ def format_alert(a):
         f"{html.escape(a['title'])}\n"
         f"{who}, {size}{star}\n"
         f"Cost with shipping: <b>${a['cost']:.2f}</b>\n"
+        f"{asking_line(a)}\n"
         f"Expected sale: ${a['expected_sale']:.0f} | Est. profit: <b>${a['profit']:.2f}</b> ({a['roi_pct']}%)\n"
         f"Condition: {html.escape(a['condition'])}\n"
         f"{a['url']}"
@@ -291,6 +361,21 @@ def search(token, watch, settings, auctions=False):
     return items
 
 
+def fetch_comps(token, watch, settings):
+    """One search: up to 200 similar live Buy It Now listings at any price, best match first."""
+    q = watch["query"][0] if isinstance(watch["query"], list) else watch["query"]
+    filters = [f"price:[{settings['min_price']}..]", "priceCurrency:USD",
+               "buyingOptions:{FIXED_PRICE}", "itemLocationCountry:US"]
+    if settings.get("condition_ids"):
+        filters.append("conditionIds:{" + "|".join(str(c) for c in settings["condition_ids"]) + "}")
+    r = requests.get(SEARCH_URL, timeout=30,
+                     params={"q": q, "filter": ",".join(filters), "limit": 200},
+                     headers={"Authorization": f"Bearer {token}", "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"})
+    if not r.ok:
+        raise EbayError(f"eBay comps search failed ({r.status_code}) for '{q}': {r.text[:300]}")
+    return r.json().get("itemSummaries", [])
+
+
 def send_telegram(text, image=None):
     base = f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN'].strip()}"
     chat = os.environ["TELEGRAM_CHAT_ID"].strip()
@@ -318,6 +403,10 @@ def save_seen(seen):
     cutoff = (datetime.now(timezone.utc) - timedelta(days=SEEN_DAYS)).isoformat()
     kept = {k: v for k, v in seen.items() if k.startswith("_") or v > cutoff}
     SEEN_FILE.write_text(json.dumps(kept, indent=0, sort_keys=True))
+
+
+def load_comps():
+    return json.loads(COMPS_FILE.read_text()) if COMPS_FILE.exists() else {}
 
 
 def main():
@@ -364,6 +453,32 @@ def main():
                 if alert and alert["profit"] > candidates.get(alert["id"], {}).get("profit", -1):
                     candidates[alert["id"]] = alert
 
+    # Asking-price check. Misspelled watches borrow the comps of their correctly spelled watch.
+    comps_cache = load_comps()
+    by_name = {w["name"]: w for w in watches}
+    comp_calls = dropped_by_check = 0
+    if settings.get("asking_price_check"):
+        for cid, alert in list(candidates.items()):
+            own = by_name[alert["watch"]]
+            comp_watch = by_name.get(own.get("comp_like"), own)
+            entry = comps_cache.get(comp_watch["name"])
+            if comps_stale(entry, settings, now):
+                try:
+                    stats = summarise_comps(fetch_comps(token, comp_watch, settings), comp_watch, settings)
+                    entry = {"fetched": now.isoformat(), "stats": stats}
+                    comps_cache[comp_watch["name"]] = entry
+                    comp_calls += 1
+                except (requests.RequestException, EbayError) as e:
+                    print(f"[error] comps for {comp_watch['name']}: {e}", file=sys.stderr)
+                    entry = entry or {"fetched": now.isoformat(), "stats": {}}
+                    comps_cache[comp_watch["name"]] = entry      # do not retry until tomorrow
+            checked = apply_asking_check(alert, entry.get("stats"), settings)
+            if checked is None:
+                dropped_by_check += 1
+                del candidates[cid]
+            else:
+                candidates[cid] = checked
+
     lead = int(seen.get(GENDER_LEAD_KEY, "0"))
     chosen, lead = select_alerts(list(candidates.values()), lead, settings)
     seen[GENDER_LEAD_KEY] = str(lead)
@@ -384,13 +499,19 @@ def main():
     print(f"sent:       men={count(chosen, 'men')} women={count(chosen, 'women')} unstated={count(chosen, None)}"
           f" held={len(cands) - sent} gender_lead={lead}")
 
+    print(f"asking-price check: dropped={dropped_by_check} comps_lookups={comp_calls}")
     if dry:
+        print("--- asking prices of similar listings (median, count) ---")
+        for name, entry in sorted(comps_cache.items()):
+            print(f"{name[:34]:34} | " + "  ".join(f"{k}=${v['median']:.0f} (n={v['n']})" for k, v in entry.get("stats", {}).items()))
         print("--- all candidates (dry run: nothing sent, nothing saved) ---")
         for c in sorted(cands, key=lambda c: (c["watch"], -c["profit"])):
-            print(f"{c['watch'][:28]:28} | ${c['cost']:>6.2f} -> ${c['expected_sale']:>5.0f} | "
-                  f"{(c['gender'] or '-'):5} {(c['size'] or '-'):3} | {'AUC' if c['auction'] else 'BIN'} | {c['title'][:90]}")
+            ask = f"ask ${c['asking_median']:>4.0f}" if c.get("asking_median") else "ask    -"
+            print(f"{c['watch'][:28]:28} | ${c['cost']:>6.2f} -> ${c['expected_sale']:>5.0f} | {ask} | profit ${c['profit']:>6.2f} | "
+                  f"{(c['gender'] or '-'):5} {(c['size'] or '-'):4} | {'AUC' if c['auction'] else 'BIN'} | {c['title'][:80]}")
     else:
         save_seen(seen)
+        COMPS_FILE.write_text(json.dumps(comps_cache, indent=1, sort_keys=True))
     summary = f"watch searches={searches} alerts={sent} errors={errors} auction_pass={len(passes) == 2}"
     print(summary)
     if manual and not dry:

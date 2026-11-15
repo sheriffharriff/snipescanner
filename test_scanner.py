@@ -81,6 +81,12 @@ def test_full_run_with_fake_ebay(monkeypatch, tmp_path, capsys):
         monkeypatch.setenv(k, "x")
     monkeypatch.setenv("SEND_SUMMARY", "1")
     monkeypatch.setattr(s, "SEEN_FILE", tmp_path / "seen.json")
+    monkeypatch.setattr(s, "COMPS_FILE", tmp_path / "comps.json")
+    comp_calls = []
+    def fake_comps(token, watch, settings):
+        comp_calls.append(watch["name"])
+        return [item(f"Arcteryx Beta AR mens L {i}", 380) for i in range(20)]
+    monkeypatch.setattr(s, "fetch_comps", fake_comps)
     monkeypatch.setattr(s, "ebay_token", lambda: "tok")
     monkeypatch.setattr(s.time, "sleep", lambda _: None)
     from datetime import timedelta
@@ -104,6 +110,8 @@ def test_full_run_with_fake_ebay(monkeypatch, tmp_path, capsys):
     assert len(sent) == 3 and "Scanner is working" in sent[-1]
     seen = s.load_seen()
     assert "A" in seen and "B" in seen and "C" not in seen
+    assert comp_calls == ["Arc'teryx Beta AR"]              # one lookup, then cached
+    assert "Similar listings ask: $380 median (20 listings)" in sent[0]
     # second run right away: nothing new, no auction pass
     calls.clear(); sent.clear()
     s.main()
@@ -210,3 +218,54 @@ def test_junk_from_first_live_scan_is_dropped():
 
 def test_4xl_is_an_off_size():
     assert s.detect_size("Carhart brown duck canvas jacket, Size 4XL") == "4XL+"
+
+# ---- asking-price check ----
+
+def test_summarise_comps_uses_watch_rules_and_gender():
+    w = W["Arc'teryx Beta AR"]
+    items = [item("Arcteryx Beta AR mens L", 300, 10), item("Arcteryx Beta AR mens M", 340),
+             item("Arcteryx Beta AR womens S", 250), item("Arcteryx Beta AR jacket", 280),
+             item("Arcteryx Beta SL mens L", 100),            # wrong model: ignored
+             item("Sierra Designs Arcteryx Beta AR style", 60)]  # other brand: ignored
+    st = s.summarise_comps(items, w, ST)
+    assert st["all"] == {"median": 295.0, "n": 4}
+    assert st["men"] == {"median": 325.0, "n": 2} and st["women"] == {"median": 250.0, "n": 1}
+
+def alert_for(cost, title="Arcteryx Beta AR mens L"):
+    return s.evaluate(item(title, cost), W["Arc'teryx Beta AR"], ST, NOW)
+
+def test_asking_check_keeps_estimate_when_market_agrees():
+    a = s.apply_asking_check(alert_for(100), {"all": {"median": 400, "n": 30}}, ST)
+    assert a["expected_sale"] == 300 and a["asking_median"] == 400 and "estimate_before_check" not in a
+    assert "Similar listings ask: $400 median (30 listings)" in s.format_alert(a)
+
+def test_asking_check_cuts_estimate_and_profit():
+    a = s.apply_asking_check(alert_for(100), {"all": {"median": 240, "n": 30}}, ST)
+    assert a["expected_sale"] == 204 and a["estimate_before_check"] == 300   # 240 x 0.85
+    assert a["profit"] == round(204 * 0.86 - 10 - 100, 2)
+    assert "estimate cut from $300" in s.format_alert(a)
+
+def test_asking_check_drops_when_market_is_too_low():
+    assert s.apply_asking_check(alert_for(150), {"all": {"median": 200, "n": 30}}, ST) is None
+
+def test_asking_check_prefers_same_gender_then_falls_back():
+    comps = {"all": {"median": 400, "n": 30}, "men": {"median": 240, "n": 12}, "women": {"median": 100, "n": 3}}
+    assert s.apply_asking_check(alert_for(100), comps, ST)["asking_median"] == 240
+    w = s.apply_asking_check(alert_for(100, "Arcteryx Beta AR womens M"), comps, ST)
+    assert w["asking_median"] == 400      # only 3 women's comps, so it uses all listings
+
+def test_asking_check_skipped_with_too_few_comps():
+    a = s.apply_asking_check(alert_for(100), {"all": {"median": 50, "n": 3}}, ST)
+    assert a["expected_sale"] == 300 and a["asking_median"] is None
+    assert "too few to compare" in s.format_alert(a)
+    assert s.apply_asking_check(alert_for(100), {}, ST)["asking_median"] is None
+
+def test_comps_stale():
+    assert s.comps_stale(None, ST, NOW)
+    assert not s.comps_stale({"fetched": "2026-11-12T00:00:00+00:00"}, ST, NOW)
+    assert s.comps_stale({"fetched": "2026-11-10T00:00:00+00:00"}, ST, NOW)
+
+def test_comp_like_points_at_real_watches():
+    for w in CFG["watches"]:
+        if "comp_like" in w:
+            assert w["comp_like"] in W, w["name"]

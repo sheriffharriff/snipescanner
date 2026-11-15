@@ -17,6 +17,15 @@ settings:
   results_per_search: 50
   max_alerts_per_run: 10
 
+  # --- asking-price check ---
+  # For each watch with a candidate, look up what similar live listings ask (once a day).
+  # Things sell for less than the asking price, so the expected sale is capped at
+  # median asking price x asking_to_sale_factor. [estimate] Tune with your real sales.
+  asking_price_check: true
+  asking_to_sale_factor: 0.85
+  min_comps: 8              # with fewer similar listings than this, skip the check
+  comps_refresh_hours: 24
+
   # --- men's / women's balance ---
   # Women's alerts pause once they lead men's by this many (and the reverse), so the
   # mix stays near 50/50. Held alerts are retried on later runs. Lower = stricter.
@@ -106,6 +115,7 @@ watches:
 
   # ---- Arc'teryx: misspelled or vague listings (the real snipes) ----
   - name: Arc'teryx misspelled
+    comp_like: "Arc'teryx no model named"      # compare against correctly spelled listings
     query: [arcterix jacket, arcteryz jacket, arc teryx jacket, arcteyx jacket, arcterx jacket]
     require_any: [arcterix, arcteryz, "arc teryx", arcteyx, arcterx]
     expected_sale: 150        # [estimate] blended; check the model before buying
@@ -130,6 +140,7 @@ watches:
     exclude_words: [wip, women, a03, one size]      # a03 = a detachable hood sold alone
     expected_sale: 90         # [checked] chore coats $65-175; generic Carhartt jackets median only $45
   - name: Carhartt misspelled
+    comp_like: "Carhartt vintage, no model named"      # compare against correctly spelled listings
     query: [carhart jacket, carhardt jacket, carharrt jacket]
     require_any: ["carhart ", carhardt, carharrt]
     must_also_have: [detroit, blanket, chore, j001, j97, j130, duck, arctic, santa fe]   # a misspelling alone is not a deal
@@ -143,6 +154,7 @@ watches:
     require_any: [retro-x, retro x]
     expected_sale: 85         # [checked] resale $45-120
   - name: Patagonia misspelled
+    comp_like: "Patagonia Retro-X"      # compare against correctly spelled listings
     query: [patogonia fleece, pategonia fleece, patagona fleece]
     require_any: [patogonia, pategonia, patagona]
     must_also_have: [retro-x, retro x, deep pile, snap-t, snap t, synchilla]
