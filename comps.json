@@ -1,4 +1,21 @@
 {
+ "Arc'teryx Beta AR": {
+  "fetched": "2026-11-15T19:09:37.584530+00:00",
+  "stats": {
+   "all": {
+    "median": 459.99,
+    "n": 109
+   },
+   "men": {
+    "median": 492.91,
+    "n": 58
+   },
+   "women": {
+    "median": 450.0,
+    "n": 39
+   }
+  }
+ },
  "Arc'teryx no model named": {
   "fetched": "2026-11-15T06:09:11.493686+00:00",
   "stats": {
