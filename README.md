@@ -1,6 +1,6 @@
 # eBay snipe scanner
 
-Searches eBay every 10 minutes for underpriced listings from `watchlist.yaml` and sends buy alerts to Telegram.
+Searches eBay every 10 minutes for underpriced Buy It Now listings from `watchlist.yaml`, and about once an hour for auctions ending within 3 hours, then sends buy alerts to Telegram.
 
 ## Setup (about 30 minutes, one time)
 
@@ -20,7 +20,9 @@ Searches eBay every 10 minutes for underpriced listings from `watchlist.yaml` an
 2. In the repo: **Settings > Secrets and variables > Actions > New repository secret**. Add four secrets:
    `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
    Secrets stay hidden even in a public repo. Never put keys in the files themselves.
-3. Open the **Actions** tab, enable workflows, pick **scan**, and click **Run workflow** to test.
+3. Open the **Actions** tab, pick **scan**, and click **Run workflow** to test. A manual run sends a "Scanner is working" message to Telegram, so you know the whole chain works even when there are no deals.
+
+Until all four secrets are set, runs finish with a yellow "Missing secrets" warning and do nothing.
 
 ## Tuning
 
@@ -41,5 +43,5 @@ python -m pytest -q             # runs the tests
 ## Limits
 
 - GitHub's schedule can run several minutes late. For faster checks, run `scanner.py` on your own machine with a 2-minute timer.
-- eBay allows about 5,000 searches a day by default. The current watchlist uses about 2,700.
+- eBay allows about 5,000 searches a day by default. The current watchlist uses about 3,200.
 - An alert means "worth a look", not "buy". Always check photos, condition and authenticity yourself.

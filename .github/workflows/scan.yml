@@ -25,10 +25,14 @@ jobs:
           EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # A manual "Run workflow" also sends a "scanner is working" message to Telegram.
+          SEND_SUMMARY: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
       - name: Save seen listings
         run: |
           git config user.name "scanner"
           git config user.email "scanner@users.noreply.github.com"
           git add seen.json
-          git diff --cached --quiet || git commit -m "update seen listings"
+          git diff --cached --quiet && exit 0
+          git commit -m "update seen listings"
+          git pull --rebase
           git push

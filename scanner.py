@@ -4,6 +4,10 @@ Env vars:
   EBAY_CLIENT_ID, EBAY_CLIENT_SECRET   eBay developer keys (production keyset)
   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID Telegram bot + your chat id
   DRY_RUN=1                            print alerts instead of sending them
+  SEND_SUMMARY=1                       also send a "scanner is working" message to Telegram
+
+Each run does a Buy It Now pass (newest listings first). About once an hour it also
+does an auction pass (auctions ending soonest first).
 """
 import base64
 import html
@@ -22,13 +26,19 @@ SEEN_FILE = ROOT / "seen.json"
 SEEN_DAYS = 14
 TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
 SEARCH_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search"
+REQUIRED_ENV = ["EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]
+AUCTION_PASS_KEY = "_last_auction_pass"
+AUCTION_PASS_EVERY_MIN = 50
 
 
 # ---------- pure logic (tested in test_scanner.py) ----------
 
 def total_cost(item):
     """Price (or current bid) plus the cheapest listed shipping. None if no price."""
-    price = item.get("price") or item.get("currentBidPrice")
+    if is_auction_only(item):
+        price = item.get("currentBidPrice") or item.get("price")
+    else:
+        price = item.get("price") or item.get("currentBidPrice")
     if not price:
         return None
     cost = float(price["value"])
@@ -105,6 +115,15 @@ def max_buy(watch, settings):
     return round(min(net - settings["min_profit"], net / (1 + settings["min_roi_pct"] / 100)), 2)
 
 
+def auction_pass_due(seen, now=None):
+    """True if the hourly auction pass has not run in the last AUCTION_PASS_EVERY_MIN minutes."""
+    last = seen.get(AUCTION_PASS_KEY)
+    if not last:
+        return True
+    now = now or datetime.now(timezone.utc)
+    return (now - datetime.fromisoformat(last)).total_seconds() >= AUCTION_PASS_EVERY_MIN * 60
+
+
 def format_alert(a):
     kind = (f"AUCTION, {a['hours_left']}h left, {a['bids'] or 0} bids" if a["auction"] else "BUY IT NOW")
     return (
@@ -128,18 +147,25 @@ def ebay_token():
         data={"grant_type": "client_credentials", "scope": "https://api.ebay.com/oauth/api_scope"},
         timeout=30,
     )
-    r.raise_for_status()
+    if not r.ok:
+        raise EbayError(f"eBay sign-in failed ({r.status_code}). Check EBAY_CLIENT_ID and "
+                        f"EBAY_CLIENT_SECRET are the PRODUCTION keys. Details: {r.text[:300]}")
     return r.json()["access_token"]
 
 
-def search(token, watch, settings):
+class EbayError(Exception):
+    pass
+
+
+def search(token, watch, settings, auctions=False):
+    """Buy It Now pass: newest listings. Auction pass: auctions ending soonest."""
     cap = max_buy(watch, settings)
     if cap <= 0:
         return []
     filters = [
         f"price:[{watch.get('min_price', settings['min_price'])}..{cap}]",
         "priceCurrency:USD",
-        "buyingOptions:{FIXED_PRICE|AUCTION}",
+        "buyingOptions:{AUCTION}" if auctions else "buyingOptions:{FIXED_PRICE|BEST_OFFER}",
         "itemLocationCountry:US",
     ]
     if settings.get("condition_ids"):
@@ -147,14 +173,16 @@ def search(token, watch, settings):
     queries = watch["query"] if isinstance(watch["query"], list) else [watch["query"]]
     items = []
     for q in queries:
-        params = {"q": q, "filter": ",".join(filters), "sort": "newlyListed",
+        params = {"q": q, "filter": ",".join(filters),
+                  "sort": "endingSoonest" if auctions else "newlyListed",
                   "limit": settings["results_per_search"]}
         if watch.get("category_id"):
             params["category_ids"] = str(watch["category_id"])
         r = requests.get(SEARCH_URL, params=params, timeout=30,
                          headers={"Authorization": f"Bearer {token}",
                                   "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"})
-        r.raise_for_status()
+        if not r.ok:
+            raise EbayError(f"eBay search failed ({r.status_code}) for '{q}': {r.text[:300]}")
         items.extend(r.json().get("itemSummaries", []))
     return items
 
@@ -169,7 +197,9 @@ def send_telegram(text, image=None):
             return
     r = requests.post(f"{base}/sendMessage", timeout=30,
                       data={"chat_id": chat, "text": text, "parse_mode": "HTML"})
-    r.raise_for_status()
+    if not r.ok:
+        raise RuntimeError(f"Telegram send failed ({r.status_code}). Check TELEGRAM_BOT_TOKEN and "
+                           f"TELEGRAM_CHAT_ID, and that you have messaged your bot once. Details: {r.text[:300]}")
 
 
 # ---------- state ----------
@@ -187,40 +217,58 @@ def save_seen(seen):
 
 
 def main():
+    missing = [k for k in REQUIRED_ENV if not os.environ.get(k)]
+    if missing:
+        # Not an error: the repo is simply not configured yet. Exit cleanly so the
+        # schedule does not send a failure email every 10 minutes.
+        print(f"::warning::Scanner skipped. Missing secrets: {', '.join(missing)}")
+        return
+
     config = yaml.safe_load((ROOT / "watchlist.yaml").read_text())
     settings, watches = config["settings"], config["watches"]
     dry = os.environ.get("DRY_RUN") == "1"
     seen = load_seen()
     token = ebay_token()
-    sent = errors = 0
+    now = datetime.now(timezone.utc)
+    passes = [False]
+    if auction_pass_due(seen, now):
+        passes.append(True)
+        seen[AUCTION_PASS_KEY] = now.isoformat()
+    sent = errors = searches = 0
 
-    for watch in watches:
-        try:
-            items = search(token, watch, settings)
-        except requests.RequestException as e:
-            errors += 1
-            print(f"[error] {watch['name']}: {e}", file=sys.stderr)
-            continue
-        for item in items:
-            if item.get("itemId") in seen:
+    for auctions in passes:
+        for watch in watches:
+            searches += 1
+            try:
+                items = search(token, watch, settings, auctions=auctions)
+            except (requests.RequestException, EbayError) as e:
+                errors += 1
+                print(f"[error] {watch['name']}: {e}", file=sys.stderr)
                 continue
-            alert = evaluate(item, watch, settings)
-            if not alert:
-                continue
-            seen[alert["id"]] = datetime.now(timezone.utc).isoformat()
-            if sent >= settings["max_alerts_per_run"]:
-                continue
-            text = format_alert(alert)
-            if dry:
-                print(text + "\n")
-            else:
-                send_telegram(text, alert["image"])
-                time.sleep(1)
-            sent += 1
+            for item in items:
+                if item.get("itemId") in seen:
+                    continue
+                alert = evaluate(item, watch, settings)
+                if not alert:
+                    continue
+                if sent >= settings["max_alerts_per_run"]:
+                    continue          # not marked seen, so it is retried next run
+                seen[alert["id"]] = datetime.now(timezone.utc).isoformat()
+                text = format_alert(alert)
+                if dry:
+                    print(text + "\n")
+                else:
+                    send_telegram(text, alert["image"])
+                    time.sleep(1)
+                sent += 1
 
     save_seen(seen)
-    print(f"searches={len(watches)} alerts={sent} errors={errors}")
-    if errors == len(watches):
+    summary = f"watch searches={searches} alerts={sent} errors={errors} auction_pass={len(passes) == 2}"
+    print(summary)
+    if os.environ.get("SEND_SUMMARY") == "1" and not dry:
+        send_telegram(f"Scanner is working.\n{summary}")
+    if errors == searches:
+        print("::error::Every eBay search failed. See the [error] lines above.")
         sys.exit(1)
 
 
