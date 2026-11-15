@@ -13,6 +13,7 @@ import base64
 import html
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -29,9 +30,47 @@ SEARCH_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search"
 REQUIRED_ENV = ["EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]
 AUCTION_PASS_KEY = "_last_auction_pass"
 AUCTION_PASS_EVERY_MIN = 50
+GENDER_LEAD_KEY = "_gender_lead"      # women's alerts sent minus men's alerts sent
+
+WOMEN_RE = re.compile(r"\b(women|womens|woman|ladies|lady|wmns|wmn|female|w's)\b")
+MEN_RE = re.compile(r"\b(men|mens|man|male|m's)\b")
+SIZE_PATTERNS = [   # order matters: longer sizes first
+    ("XXS", r"\b(xxs|2xs|xx-small)\b"),
+    ("3XL", r"\b(xxxl|3xl|3x)\b"),
+    ("XXL", r"\b(xxl|2xl|2x|xx-large|xx large)\b"),
+    ("XS", r"\b(xs|x-small|x small|extra small)\b"),
+    ("XL", r"\b(xl|x-large|x large|extra large)\b"),
+    ("S", r"\b(s|sm|small)\b"),
+    ("M", r"\b(m|med|medium)\b"),
+    ("L", r"\b(l|lg|large)\b"),
+]
 
 
 # ---------- pure logic (tested in test_scanner.py) ----------
+
+def norm(title):
+    """Lowercase and straighten curly apostrophes so word checks are reliable."""
+    return (title or "").lower().replace("\u2019", "'").replace("\u2018", "'").replace("`", "'")
+
+
+def detect_gender(title):
+    """'women', 'men', or None when the title does not say."""
+    t = norm(title)
+    if WOMEN_RE.search(t):
+        return "women"
+    if MEN_RE.search(t):
+        return "men"
+    return None
+
+
+def detect_size(title):
+    """Letter size (XXS to 3XL) from the title, or None."""
+    t = re.sub(r"'s\b", "s", norm(title))      # "men's" -> "mens", so the "s" is not read as Small
+    for size, pattern in SIZE_PATTERNS:
+        if re.search(pattern, t):
+            return size
+    return None
+
 
 def total_cost(item):
     """Price (or current bid) plus the cheapest listed shipping. None if no price."""
@@ -63,7 +102,13 @@ def hours_left(item, now=None):
 
 def evaluate(item, watch, settings, now=None):
     """Return an alert dict if the listing is a buy candidate, else None."""
-    title = (item.get("title") or "").lower()
+    title = norm(item.get("title"))
+
+    # The brand must be in the title. eBay also matches on descriptions, which lets
+    # other brands through (e.g. a jacket that only mentions the brand as a comparison).
+    brand = watch.get("brand", [])
+    if brand and not any(b.lower() in title for b in brand):
+        return None
 
     for word in settings.get("exclude_words", []) + watch.get("exclude_words", []):
         if word.lower() in title:
@@ -85,7 +130,18 @@ def evaluate(item, watch, settings, now=None):
         if left is None or left <= 0 or left > settings["auction_window_hours"]:
             return None
 
+    gender = detect_gender(title)
+    size = detect_size(title)
+    size_key = "women" if gender == "women" else "men"     # unlabeled listings are sized like men's
+    best_size = size in settings.get("best_sizes", {}).get(size_key, [])
+    off_size = size in settings.get("off_sizes", {}).get(size_key, [])
+
     sale = float(watch["expected_sale"])
+    if gender == "women":
+        sale *= settings.get("womens_sale_factor", 1.0)
+    if off_size:
+        sale *= settings.get("off_size_sale_factor", 1.0)
+    sale = round(sale, 2)
     net_sale = sale * (1 - settings["sell_fee_pct"] / 100) - settings["ship_out_cost"]
     profit = net_sale - cost
     roi = profit / cost if cost > 0 else 0.0
@@ -106,6 +162,9 @@ def evaluate(item, watch, settings, now=None):
         "condition": item.get("condition", "?"),
         "url": item.get("itemWebUrl", ""),
         "image": (item.get("image") or {}).get("imageUrl"),
+        "gender": gender,
+        "size": size,
+        "best_size": best_size,
     }
 
 
@@ -124,11 +183,45 @@ def auction_pass_due(seen, now=None):
     return (now - datetime.fromisoformat(last)).total_seconds() >= AUCTION_PASS_EVERY_MIN * 60
 
 
+def select_alerts(candidates, lead, settings):
+    """Pick which candidates to send this run, keeping men's and women's alerts balanced.
+
+    lead = women's alerts sent minus men's alerts sent so far. A women's alert is held
+    once women's lead by max_gender_lead, and the same for men's the other way. Held
+    alerts are retried on later runs. Anything with profit >= always_alert_profit is sent
+    regardless. Best sizes go first, then highest profit.
+    Returns (chosen, new_lead).
+    """
+    max_lead = settings.get("max_gender_lead", 10**9)
+    always = settings.get("always_alert_profit", float("inf"))
+    chosen = []
+    waiting = sorted(candidates, key=lambda c: (not c["best_size"], -c["profit"]))
+    progress = True
+    while progress and waiting:      # repeat: a men's alert can free up a held women's one
+        progress, still_waiting = False, []
+        for c in waiting:
+            if len(chosen) >= settings["max_alerts_per_run"]:
+                break
+            step = {"women": 1, "men": -1}.get(c["gender"], 0)
+            if c["profit"] < always and abs(lead + step) > max_lead:
+                still_waiting.append(c)
+                continue
+            lead = max(-max_lead, min(max_lead, lead + step))
+            chosen.append(c)
+            progress = True
+        waiting = still_waiting
+    return chosen, lead
+
+
 def format_alert(a):
     kind = (f"AUCTION, {a['hours_left']}h left, {a['bids'] or 0} bids" if a["auction"] else "BUY IT NOW")
+    who = {"men": "Men's", "women": "Women's"}.get(a.get("gender"), "Gender not stated")
+    size = a.get("size") or "size not stated"
+    star = " (top size)" if a.get("best_size") else ""
     return (
         f"<b>{html.escape(a['watch'])}</b> | {kind}\n"
         f"{html.escape(a['title'])}\n"
+        f"{who}, {size}{star}\n"
         f"Cost with shipping: <b>${a['cost']:.2f}</b>\n"
         f"Expected sale: ${a['expected_sale']:.0f} | Est. profit: <b>${a['profit']:.2f}</b> ({a['roi_pct']}%)\n"
         f"Condition: {html.escape(a['condition'])}\n"
@@ -212,7 +305,7 @@ def load_seen():
 
 def save_seen(seen):
     cutoff = (datetime.now(timezone.utc) - timedelta(days=SEEN_DAYS)).isoformat()
-    kept = {k: v for k, v in seen.items() if v > cutoff}
+    kept = {k: v for k, v in seen.items() if k.startswith("_") or v > cutoff}
     SEEN_FILE.write_text(json.dumps(kept, indent=0, sort_keys=True))
 
 
@@ -241,7 +334,8 @@ def main():
     if auction_pass_due(seen, now):
         passes.append(True)
         seen[AUCTION_PASS_KEY] = now.isoformat()
-    sent = errors = searches = 0
+    errors = searches = 0
+    candidates = {}
 
     for auctions in passes:
         for watch in watches:
@@ -256,18 +350,28 @@ def main():
                 if item.get("itemId") in seen:
                     continue
                 alert = evaluate(item, watch, settings)
-                if not alert:
-                    continue
-                if sent >= settings["max_alerts_per_run"]:
-                    continue          # not marked seen, so it is retried next run
-                seen[alert["id"]] = datetime.now(timezone.utc).isoformat()
-                text = format_alert(alert)
-                if dry:
-                    print(text + "\n")
-                else:
-                    send_telegram(text, alert["image"])
-                    time.sleep(1)
-                sent += 1
+                if alert and alert["profit"] > candidates.get(alert["id"], {}).get("profit", -1):
+                    candidates[alert["id"]] = alert
+
+    lead = int(seen.get(GENDER_LEAD_KEY, "0"))
+    chosen, lead = select_alerts(list(candidates.values()), lead, settings)
+    seen[GENDER_LEAD_KEY] = str(lead)
+    for alert in chosen:            # anything not chosen stays unseen and is retried next run
+        seen[alert["id"]] = datetime.now(timezone.utc).isoformat()
+        text = format_alert(alert)
+        if dry:
+            print(text + "\n")
+        else:
+            send_telegram(text, alert["image"])
+            time.sleep(1)
+    sent = len(chosen)
+
+    def count(rows, g):
+        return sum(1 for r in rows if r["gender"] == g)
+    cands = list(candidates.values())
+    print(f"candidates: men={count(cands, 'men')} women={count(cands, 'women')} unstated={count(cands, None)}")
+    print(f"sent:       men={count(chosen, 'men')} women={count(chosen, 'women')} unstated={count(chosen, None)}"
+          f" held={len(cands) - sent} gender_lead={lead}")
 
     save_seen(seen)
     summary = f"watch searches={searches} alerts={sent} errors={errors} auction_pass={len(passes) == 2}"

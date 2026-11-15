@@ -30,6 +30,9 @@ Everything is in `watchlist.yaml`:
 - `expected_sale` is what the item really sells for. The scanner works out the highest price worth paying from it.
 - `min_profit` and `min_roi_pct` set how picky it is. Too many alerts: raise them. None: lower them or add watches.
 - `exclude_words` drops junk listings.
+- `max_gender_lead` keeps men's and women's alerts near 50/50. `always_alert_profit` lets big deals through regardless.
+- `womens_sale_factor`, `best_sizes`, `off_sizes` and `off_size_sale_factor` set how gender and size change the expected sale price.
+- `brand` on a watch lists the spellings that must appear in the listing title.
 
 ## Run it locally
 

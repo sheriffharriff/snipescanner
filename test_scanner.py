@@ -120,3 +120,65 @@ def test_bad_ebay_keys(monkeypatch, capsys):
     monkeypatch.setenv("SEND_SUMMARY", "0")
     with pytest.raises(SystemExit) as e: s.main()
     assert e.value.code == 0 and "::warning::" in capsys.readouterr().out
+
+# ---- brand, gender, size, balance ----
+
+def test_brand_must_be_in_title():
+    w = W["Arc'teryx no model named"]
+    assert s.evaluate(item("Green SLAM yellow gortex jacket", 30), w, ST, NOW) is None
+    assert s.evaluate(item("Arc’teryx gore-tex jacket mens L", 30), w, ST, NOW)
+
+def test_detect_gender():
+    assert s.detect_gender("Arc'teryx Beta AR Women’s Medium") == "women"
+    assert s.detect_gender("Arcteryx Beta AR Womens M") == "women"
+    assert s.detect_gender("Arcteryx Beta AR W's small") == "women"
+    assert s.detect_gender("Arcteryx Beta AR Men's L") == "men"
+    assert s.detect_gender("Arcteryx Beta AR mens large") == "men"
+    assert s.detect_gender("Arcteryx Beta AR jacket L") is None
+
+def test_detect_size():
+    cases = {"Arcteryx Beta AR Men's L": "L", "Beta LT jacket womens medium": "M",
+             "Alpha SV Size S": "S", "Arc'teryx Atom Men's XL black": "XL",
+             "Retro-X fleece X-Large": "XL", "jacket mens x-small": "XS", "Beta AR XXL": "XXL",
+             "Beta SL jacket 2XL": "XXL", "Carhartt Detroit jacket 44": None,
+             "Arc'teryx Beta AR Men's jacket": None, "Women's Beta AR XS": "XS", "atom lt sz m": "M"}
+    for title, want in cases.items():
+        assert s.detect_size(title) == want, title
+
+def test_womens_and_off_size_lower_expected_sale():
+    w = W["Arc'teryx Beta AR"]
+    men = s.evaluate(item("Arcteryx Beta AR mens L", 100), w, ST, NOW)
+    women = s.evaluate(item("Arcteryx Beta AR womens M", 100), w, ST, NOW)
+    off = s.evaluate(item("Arcteryx Beta AR mens XXL", 100), w, ST, NOW)
+    assert men["expected_sale"] == 300 and men["best_size"] and men["gender"] == "men"
+    assert women["expected_sale"] == 255 and women["best_size"] and women["gender"] == "women"
+    assert off["expected_sale"] == 255 and not off["best_size"]
+    # a women's piece that only cleared the bar at the men's price is now skipped
+    assert s.evaluate(item("Arcteryx Beta AR mens L", 160), w, ST, NOW)
+    assert s.evaluate(item("Arcteryx Beta AR womens M", 160), w, ST, NOW) is None
+    assert "Women's, M (top size)" in s.format_alert(women)
+
+def cand(i, gender, profit, best=False):
+    return {"id": str(i), "gender": gender, "profit": profit, "best_size": best}
+
+def test_select_balances_gender():
+    st = dict(ST, max_alerts_per_run=10, max_gender_lead=4, always_alert_profit=100)
+    women = [cand(i, "women", 50) for i in range(8)]
+    chosen, lead = s.select_alerts(women, 0, st)
+    assert len(chosen) == 4 and lead == 4                    # women's pause at a lead of 4
+    chosen, lead = s.select_alerts(women, 4, st)
+    assert chosen == [] and lead == 4
+    mixed = women + [cand(100 + i, "men", 40) for i in range(3)]
+    chosen, lead = s.select_alerts(mixed, 4, st)             # men's alerts free up women's
+    assert sum(c["gender"] == "men" for c in chosen) == 3
+    assert sum(c["gender"] == "women" for c in chosen) == 3 and lead == 4
+    big = [cand(200, "women", 150)]
+    chosen, lead = s.select_alerts(big, 4, st)               # big profit always goes through
+    assert len(chosen) == 1 and lead == 4
+    chosen, _ = s.select_alerts([cand(1, None, 30), cand(2, "men", 30, best=True), cand(3, "men", 90)], 0, st)
+    assert [c["id"] for c in chosen] == ["2", "3", "1"]      # top size first, then profit
+
+def test_select_respects_cap():
+    st = dict(ST, max_alerts_per_run=3, max_gender_lead=4, always_alert_profit=100)
+    chosen, _ = s.select_alerts([cand(i, None, 30 + i) for i in range(9)], 0, st)
+    assert len(chosen) == 3 and chosen[0]["profit"] == 38

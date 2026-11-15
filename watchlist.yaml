@@ -16,6 +16,25 @@ settings:
   auction_window_hours: 3   # only alert on auctions ending within this many hours
   results_per_search: 50
   max_alerts_per_run: 10
+
+  # --- men's / women's balance ---
+  # Women's alerts pause once they lead men's by this many (and the reverse), so the
+  # mix stays near 50/50. Held alerts are retried on later runs. Lower = stricter.
+  max_gender_lead: 4
+  # A deal with at least this much estimated profit is always sent, whatever the balance.
+  always_alert_profit: 100
+  # expected_sale prices are men's prices. Women's pieces are assumed to resell for
+  # this share of them. [estimate] Tune after your first few women's sales.
+  womens_sale_factor: 0.85
+
+  # --- sizes ---
+  best_sizes:               # sent first and marked "(top size)"
+    men: [M, L]
+    women: [S, M]
+  off_sizes:                # harder to sell, so the expected sale is cut by the factor below
+    men: [XXS, XS, XXL, 3XL]
+    women: [XXS, XL, XXL, 3XL]
+  off_size_sale_factor: 0.85
   condition_ids: [1000, 1500, 1750, 2990, 3000]   # new, and pre-owned down to "good"
   exclude_words:
     - kids
@@ -38,18 +57,22 @@ settings:
 watches:
   # ---- Arc'teryx: named models priced low ----
   - name: Arc'teryx Beta AR
+    brand: [arcteryx, "arc'teryx", arc-teryx]
     query: arcteryx beta ar jacket
     require_any: [beta ar]
     expected_sale: 300        # [checked] used sold $330-400, new with tags $500-590
   - name: Arc'teryx Beta LT
+    brand: [arcteryx, "arc'teryx", arc-teryx]
     query: arcteryx beta lt jacket
     require_any: [beta lt]
     expected_sale: 220        # [checked] used sold $200-390
   - name: Arc'teryx Alpha SV
+    brand: [arcteryx, "arc'teryx", arc-teryx]
     query: arcteryx alpha sv jacket
     require_any: [alpha sv]
     expected_sale: 330        # [estimate]
   - name: Arc'teryx Atom
+    brand: [arcteryx, "arc'teryx", arc-teryx]
     query: arcteryx atom hoody
     require_any: [atom]
     expected_sale: 120        # [estimate]
@@ -60,17 +83,20 @@ watches:
     require_any: [arcterix, arcteryz, "arc teryx", arcteyx, arcterx]
     expected_sale: 150        # [estimate] blended; check the model before buying
   - name: Arc'teryx no model named
+    brand: [arcteryx, "arc'teryx", arc-teryx]
     query: arcteryx gore-tex jacket
     skip_if_title_has: [beta, alpha, zeta, theta, gamma, atom, sabre, rush, macai, sidewinder, cerium, proton]
     expected_sale: 170        # [estimate] an unnamed Gore-Tex shell is usually worth at least this
 
   # ---- Carhartt ----
   - name: Carhartt Detroit jacket
+    brand: [carhartt]
     query: carhartt detroit jacket
     require_any: [detroit, j001, j97]
     exclude_words: [wip, women]
     expected_sale: 150        # [checked] blanket-lined Detroit median about $190-200; set lower to be safe
   - name: Carhartt vintage, no model named
+    brand: [carhartt]
     query: vintage carhartt blanket lined jacket
     skip_if_title_has: [detroit, j001, j97]
     expected_sale: 90         # [checked] chore coats $65-175; generic Carhartt jackets median only $45
@@ -82,6 +108,7 @@ watches:
 
   # ---- Patagonia (lower prices, so fewer alerts will clear the profit floor) ----
   - name: Patagonia Retro-X
+    brand: [patagonia]
     query: patagonia retro-x fleece jacket
     require_any: [retro-x, retro x]
     expected_sale: 85         # [checked] resale $45-120
