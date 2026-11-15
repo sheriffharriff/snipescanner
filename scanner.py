@@ -139,7 +139,7 @@ def format_alert(a):
 # ---------- network ----------
 
 def ebay_token():
-    creds = f"{os.environ['EBAY_CLIENT_ID']}:{os.environ['EBAY_CLIENT_SECRET']}"
+    creds = f"{os.environ['EBAY_CLIENT_ID'].strip()}:{os.environ['EBAY_CLIENT_SECRET'].strip()}"
     r = requests.post(
         TOKEN_URL,
         headers={"Authorization": "Basic " + base64.b64encode(creds.encode()).decode(),
@@ -188,8 +188,8 @@ def search(token, watch, settings, auctions=False):
 
 
 def send_telegram(text, image=None):
-    base = f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN']}"
-    chat = os.environ["TELEGRAM_CHAT_ID"]
+    base = f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN'].strip()}"
+    chat = os.environ["TELEGRAM_CHAT_ID"].strip()
     if image:
         r = requests.post(f"{base}/sendPhoto", timeout=30,
                           data={"chat_id": chat, "photo": image, "caption": text[:1024], "parse_mode": "HTML"})
@@ -217,7 +217,7 @@ def save_seen(seen):
 
 
 def main():
-    missing = [k for k in REQUIRED_ENV if not os.environ.get(k)]
+    missing = [k for k in REQUIRED_ENV if not os.environ.get(k, "").strip()]
     if missing:
         # Not an error: the repo is simply not configured yet. Exit cleanly so the
         # schedule does not send a failure email every 10 minutes.
@@ -228,7 +228,14 @@ def main():
     settings, watches = config["settings"], config["watches"]
     dry = os.environ.get("DRY_RUN") == "1"
     seen = load_seen()
-    token = ebay_token()
+    manual = os.environ.get("SEND_SUMMARY") == "1"
+    try:
+        token = ebay_token()
+    except EbayError as e:
+        # Fail loudly on a manual run. On the 10-minute schedule, warn and stop so a
+        # wrong key does not send a failure email every 10 minutes.
+        print(f"::{'error' if manual else 'warning'}::{e}")
+        sys.exit(1 if manual else 0)
     now = datetime.now(timezone.utc)
     passes = [False]
     if auction_pass_due(seen, now):
@@ -265,7 +272,7 @@ def main():
     save_seen(seen)
     summary = f"watch searches={searches} alerts={sent} errors={errors} auction_pass={len(passes) == 2}"
     print(summary)
-    if os.environ.get("SEND_SUMMARY") == "1" and not dry:
+    if manual and not dry:
         send_telegram(f"Scanner is working.\n{summary}")
     if errors == searches:
         print("::error::Every eBay search failed. See the [error] lines above.")

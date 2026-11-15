@@ -107,3 +107,16 @@ def test_full_run_with_fake_ebay(monkeypatch, tmp_path, capsys):
     calls.clear(); sent.clear()
     s.main()
     assert len(calls) == n and sent == ["Scanner is working.\n" + capsys.readouterr().out.strip().splitlines()[-1]]
+
+def test_bad_ebay_keys(monkeypatch, capsys):
+    import pytest
+    for k in s.REQUIRED_ENV:
+        monkeypatch.setenv(k, "x")
+    def boom(): raise s.EbayError("eBay sign-in failed (401)")
+    monkeypatch.setattr(s, "ebay_token", boom)
+    monkeypatch.setenv("SEND_SUMMARY", "1")
+    with pytest.raises(SystemExit) as e: s.main()
+    assert e.value.code == 1 and "::error::" in capsys.readouterr().out
+    monkeypatch.setenv("SEND_SUMMARY", "0")
+    with pytest.raises(SystemExit) as e: s.main()
+    assert e.value.code == 0 and "::warning::" in capsys.readouterr().out
