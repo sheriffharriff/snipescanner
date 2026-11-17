@@ -1,4 +1,21 @@
 {
+ "Arc'teryx Alpha SV": {
+  "fetched": "2026-11-17T03:14:14.360415+00:00",
+  "stats": {
+   "all": {
+    "median": 600.0,
+    "n": 150
+   },
+   "men": {
+    "median": 613.42,
+    "n": 92
+   },
+   "women": {
+    "median": 450.0,
+    "n": 19
+   }
+  }
+ },
  "Arc'teryx Beta AR": {
   "fetched": "2026-11-15T19:09:37.584530+00:00",
   "stats": {
@@ -47,15 +64,15 @@
   }
  },
  "Carhartt vintage, no model named": {
-  "fetched": "2026-11-15T06:09:11.493686+00:00",
+  "fetched": "2026-11-17T03:14:14.360415+00:00",
   "stats": {
    "all": {
-    "median": 131.99,
-    "n": 134
+    "median": 134.99,
+    "n": 127
    },
    "men": {
-    "median": 140.0,
-    "n": 65
+    "median": 135.43,
+    "n": 54
    }
   }
  },
