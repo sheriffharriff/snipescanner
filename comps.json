@@ -68,45 +68,45 @@
   }
  },
  "Carhartt Detroit jacket": {
-  "fetched": "2026-11-20T07:43:44.984108+00:00",
+  "fetched": "2026-11-21T23:28:20.181979+00:00",
   "stats": {
    "all": {
-    "median": 299.99,
+    "median": 276.0,
     "n": 145
    },
    "men": {
-    "median": 294.89,
-    "n": 64
+    "median": 290.0,
+    "n": 67
    }
   }
  },
  "Carhartt vintage, no model named": {
-  "fetched": "2026-11-19T01:12:30.211710+00:00",
+  "fetched": "2026-11-21T23:28:20.181979+00:00",
   "stats": {
    "all": {
-    "median": 140.73,
-    "n": 119
+    "median": 144.24,
+    "n": 120
    },
    "men": {
-    "median": 138.0,
-    "n": 53
+    "median": 147.99,
+    "n": 54
    }
   }
  },
  "Patagonia Retro-X": {
-  "fetched": "2026-11-19T01:12:30.211710+00:00",
+  "fetched": "2026-11-21T23:28:20.181979+00:00",
   "stats": {
    "all": {
-    "median": 145.5,
+    "median": 140.97,
     "n": 184
    },
    "men": {
-    "median": 149.22,
-    "n": 118
+    "median": 149.96,
+    "n": 112
    },
    "women": {
-    "median": 136.5,
-    "n": 26
+    "median": 95.95,
+    "n": 28
    }
   }
  }
