@@ -81,15 +81,15 @@
   }
  },
  "Carhartt vintage, no model named": {
-  "fetched": "2026-11-24T14:39:21.726662+00:00",
+  "fetched": "2026-11-25T16:10:29.194992+00:00",
   "stats": {
    "all": {
-    "median": 129.12,
-    "n": 124
+    "median": 140.0,
+    "n": 130
    },
    "men": {
     "median": 139.0,
-    "n": 55
+    "n": 57
    }
   }
  },
