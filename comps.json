@@ -1,14 +1,14 @@
 {
  "Arc'teryx Alpha SV": {
-  "fetched": "2026-11-24T14:39:21.726662+00:00",
+  "fetched": "2026-11-26T18:51:18.312298+00:00",
   "stats": {
    "all": {
-    "median": 600.0,
-    "n": 154
+    "median": 611.5,
+    "n": 152
    },
    "men": {
-    "median": 599.5,
-    "n": 104
+    "median": 613.42,
+    "n": 96
    },
    "women": {
     "median": 569.0,
@@ -98,32 +98,32 @@
   }
  },
  "Carhartt vintage, no model named": {
-  "fetched": "2026-11-25T16:10:29.194992+00:00",
+  "fetched": "2026-11-26T18:51:18.312298+00:00",
   "stats": {
    "all": {
     "median": 140.0,
-    "n": 130
+    "n": 141
    },
    "men": {
-    "median": 139.0,
-    "n": 57
+    "median": 146.99,
+    "n": 62
    }
   }
  },
  "Patagonia Retro-X": {
-  "fetched": "2026-11-21T23:28:20.181979+00:00",
+  "fetched": "2026-11-26T18:51:18.312298+00:00",
   "stats": {
    "all": {
-    "median": 140.97,
+    "median": 139.47,
     "n": 184
    },
    "men": {
-    "median": 149.96,
-    "n": 112
+    "median": 143.99,
+    "n": 125
    },
    "women": {
-    "median": 95.95,
-    "n": 28
+    "median": 99.92,
+    "n": 21
    }
   }
  }
