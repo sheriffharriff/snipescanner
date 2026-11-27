@@ -68,19 +68,19 @@
   }
  },
  "Arc'teryx no model named": {
-  "fetched": "2026-11-15T06:09:11.493686+00:00",
+  "fetched": "2026-11-27T19:41:55.605333+00:00",
   "stats": {
    "all": {
-    "median": 250.0,
-    "n": 59
+    "median": 299.99,
+    "n": 85
    },
    "men": {
-    "median": 250.0,
-    "n": 47
+    "median": 314.47,
+    "n": 66
    },
    "women": {
-    "median": 200.0,
-    "n": 5
+    "median": 240.0,
+    "n": 13
    }
   }
  },
@@ -98,15 +98,15 @@
   }
  },
  "Carhartt vintage, no model named": {
-  "fetched": "2026-11-26T18:51:18.312298+00:00",
+  "fetched": "2026-11-27T19:41:55.605333+00:00",
   "stats": {
    "all": {
-    "median": 140.0,
-    "n": 141
+    "median": 142.63,
+    "n": 134
    },
    "men": {
-    "median": 146.99,
-    "n": 62
+    "median": 148.99,
+    "n": 59
    }
   }
  },
